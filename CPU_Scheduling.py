@@ -143,9 +143,14 @@ KV = '''
                                 text_size: self.size
 
                             # INPUT ROW (ALIGNED UNDER HEADER)
-                            MDRaisedButton:
-                                text: "Add Process"
-                                on_release: root.add_process()
+                            MDBoxLayout:
+                                orientation: "vertical"
+                                padding: dp(4)
+
+                                MDRaisedButton:
+                                    text: "Add Process"
+                                    pos_hint: {"center_y": .5}
+                                    on_release: root.add_process()
 
                             MDTextField:
                                 id: at_input
@@ -185,13 +190,15 @@ KV = '''
                             id: gantt_boxes
                             orientation: "horizontal"
                             size_hint_y: None
-                            height: dp(50)
+                            height: dp(60)
+                            spacing: 0
 
                         MDBoxLayout:
                             id: gantt_times
                             orientation: "horizontal"
                             size_hint_y: None
                             height: dp(25)
+                            spacing: 0
                                     
                 # TURNAROUND TIME & WAITING TIME
                 MDBoxLayout:
@@ -288,18 +295,29 @@ class CPU_Scheduling_Screen(MDScreen):
         print("Added:", process)
 
     def clear_table(self):
+
         self.processes.clear()
         self.process_counter = 1
 
         table = self.ids.table_layout
 
+        # Remove added process rows
         while len(table.children) > 10:
             table.remove_widget(table.children[0])
 
+        # Clear inputs
+        self.ids.at_input.text = ""
+        self.ids.bt_input.text = ""
+        self.ids.priority_input.text = ""
+        self.ids.quantum_time.text = ""
+
+        # Reset results
         self.ids.waiting_time.text = "0 ms"
         self.ids.turnaround_time.text = "0 ms"
 
-        self.ids.gantt_chart.clear_widgets()
+        # Clear Gantt Chart
+        self.ids.gantt_boxes.clear_widgets()
+        self.ids.gantt_times.clear_widgets()
 
         print("Table Cleared")
 
@@ -310,50 +328,58 @@ class CPU_Scheduling_Screen(MDScreen):
         self.ids.gantt_times.clear_widgets()
 
         current_time = 0
-        times = []
 
-        for p in processes:
+        for index, p in enumerate(processes):
 
             if current_time < p["at"]:
                 current_time = p["at"]
 
-            start = current_time
-            end = start + p["bt"]
+            start_time = current_time
+            end_time = current_time + p["bt"]
 
-            times.append(start)
+            box_width = max(80, p["bt"] * 40)
 
+            # PROCESS BOX
             box = MDCard(
-                size_hint_x=None,
-                width=max(80, p["bt"] * 40),
-                radius=[0, 0, 0, 0]
+                size_hint=(None, None),
+                width=box_width,
+                height=50,
+                radius=[0, 0, 0, 0],
+                style="outlined"
             )
 
             box.add_widget(
                 MDLabel(
                     text=p["pid"],
-                    halign="center"
+                    halign="center",
+                    valign="middle",
+                    text_size=(box_width, 50)
                 )
             )
 
             self.ids.gantt_boxes.add_widget(box)
 
-            current_time = end
-
-        times.append(current_time)
-
-        # Timeline row
-        for i, t in enumerate(times):
-
-            lbl = MDLabel(
-                text=str(t),
-                halign="left" if i == 0 else "center"
+            # START TIME
+            time_label = MDLabel(
+                text=str(start_time),
+                size_hint=(None, 1),
+                width=box_width,
+                halign="left"
             )
 
-            if i < len(processes):
-                lbl.size_hint_x = None
-                lbl.width = max(80, processes[i]["bt"] * 40)
+            self.ids.gantt_times.add_widget(time_label)
 
-            self.ids.gantt_times.add_widget(lbl)
+            current_time = end_time
+
+        # FINAL TIME
+        self.ids.gantt_times.add_widget(
+            MDLabel(
+                text=str(current_time),
+                size_hint=(None, 1),
+                width=40,
+                halign="left"
+            )
+        )
 
     def fcfs_pressed(self):
 
@@ -402,10 +428,125 @@ class CPU_Scheduling_Screen(MDScreen):
 
 
     def sjf_preemptive_pressed(self):
-        print("SJF (Pre-Emptive) Button Pressed")
+
+        if len(self.processes) == 0:
+            self.ids.waiting_time.text = "0 ms"
+            self.ids.turnaround_time.text = "0 ms"
+            return
+
+        processes = []
+
+        for p in self.processes:
+            processes.append({
+                "pid": p["pid"],
+                "at": p["at"],
+                "bt": p["bt"],
+                "remaining": p["bt"]
+            })
+
+        current_time = 0
+        completed = 0
+        n = len(processes)
+
+        gantt = []
+
+        while completed < n:
+
+            available = [
+                p for p in processes
+                if p["at"] <= current_time and p["remaining"] > 0
+            ]
+
+            if not available:
+                current_time += 1
+                continue
+
+            current = min(
+                available,
+                key=lambda p: p["remaining"]
+            )
+
+            gantt.append(current["pid"])
+
+            current["remaining"] -= 1
+            current_time += 1
+
+            if current["remaining"] == 0:
+
+                completed += 1
+
+                finish_time = current_time
+
+                tat = finish_time - current["at"]
+                wt = tat - current["bt"]
+
+                current["tat"] = tat
+                current["wt"] = wt
+
+        avg_waiting = sum(
+            p["wt"] for p in processes
+        ) / n
+
+        avg_turnaround = sum(
+            p["tat"] for p in processes
+        ) / n
+
+        self.ids.waiting_time.text = f"{avg_waiting:.2f} ms"
+        self.ids.turnaround_time.text = f"{avg_turnaround:.2f} ms"
+
+        print("Gantt:", gantt)
 
     def sjf_nonpreemptive_pressed(self):
-        print("SJF (Non-Pre-Emptive) Button Pressed")
+
+        if len(self.processes) == 0:
+            self.ids.waiting_time.text = "0 ms"
+            self.ids.turnaround_time.text = "0 ms"
+            return
+
+        processes = [p.copy() for p in self.processes]
+
+        completed = []
+        current_time = 0
+
+        total_waiting = 0
+        total_turnaround = 0
+
+        while len(completed) < len(processes):
+
+            available = [
+                p for p in processes
+                if p not in completed and p["at"] <= current_time
+            ]
+
+            if not available:
+                current_time += 1
+                continue
+
+            shortest = min(
+                available,
+                key=lambda p: p["bt"]
+            )
+
+            waiting = current_time - shortest["at"]
+            turnaround = waiting + shortest["bt"]
+
+            shortest["wt"] = waiting
+            shortest["tat"] = turnaround
+
+            total_waiting += waiting
+            total_turnaround += turnaround
+
+            current_time += shortest["bt"]
+
+            completed.append(shortest)
+
+        avg_waiting = total_waiting / len(processes)
+        avg_turnaround = total_turnaround / len(processes)
+
+        self.ids.waiting_time.text = f"{avg_waiting:.2f} ms"
+        self.ids.turnaround_time.text = f"{avg_turnaround:.2f} ms"
+
+        self.draw_gantt_chart(completed)
 
     def priority_preemptive_pressed(self):
         print("Priority (Pre-Emptive) Button Pressed")
