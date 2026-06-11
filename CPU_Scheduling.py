@@ -269,11 +269,14 @@ class CPU_Scheduling_Screen(MDScreen):
 
         pid = f"P{self.process_counter}"
 
+        qt = self.ids.quantum_time.text.strip()
+
         process = {
             "pid": pid,
             "at": int(at),
             "bt": int(bt),
-            "priority": int(priority) if priority else 0
+            "priority": int(priority) if priority else 0,
+            "qt": int(qt) if qt else 0
         }
 
         self.processes.append(process)
@@ -284,7 +287,9 @@ class CPU_Scheduling_Screen(MDScreen):
         table.add_widget(MDLabel(text=at))
         table.add_widget(MDLabel(text=bt))
         table.add_widget(MDLabel(text=priority if priority else "0"))
-        table.add_widget(MDLabel(text="-"))
+        table.add_widget(MDLabel(
+        text=self.ids.quantum_time.text if self.ids.quantum_time.text else "-"
+    ))
 
         self.process_counter += 1
 
@@ -329,57 +334,58 @@ class CPU_Scheduling_Screen(MDScreen):
 
         current_time = 0
 
-        for index, p in enumerate(processes):
+        # Initial time
+        self.ids.gantt_times.add_widget(
+            MDLabel(
+                text=str(current_time),
+                size_hint_x=None,
+                width=40,
+                halign="left"
+            )
+        )
+
+        for p in processes:
 
             if current_time < p["at"]:
                 current_time = p["at"]
 
             start_time = current_time
-            end_time = current_time + p["bt"]
+            end_time = p["at"] + p["bt"]
 
             box_width = max(80, p["bt"] * 40)
 
-            # PROCESS BOX
-            box = MDCard(
+            # Create the Gantt box
+            process_box = MDCard(
                 size_hint=(None, None),
                 width=box_width,
-                height=50,
+                height=60,
                 radius=[0, 0, 0, 0],
-                style="outlined"
+                elevation=1,
             )
 
-            box.add_widget(
+            process_box.add_widget(
                 MDLabel(
                     text=p["pid"],
                     halign="center",
                     valign="middle",
-                    text_size=(box_width, 50)
+                    text_size=(box_width, 60),
                 )
             )
 
-            self.ids.gantt_boxes.add_widget(box)
+            self.ids.gantt_boxes.add_widget(process_box)
 
-            # START TIME
-            time_label = MDLabel(
-                text=str(start_time),
-                size_hint=(None, 1),
-                width=box_width,
-                halign="left"
+            # Add ending time under the box
+            self.ids.gantt_times.add_widget(
+                MDLabel(
+                    text=str(end_time),
+                    size_hint_x=None,
+                    width=box_width,
+                    halign="right",
+                )
             )
-
-            self.ids.gantt_times.add_widget(time_label)
 
             current_time = end_time
 
-        # FINAL TIME
-        self.ids.gantt_times.add_widget(
-            MDLabel(
-                text=str(current_time),
-                size_hint=(None, 1),
-                width=40,
-                halign="left"
-            )
-        )
 
     def fcfs_pressed(self):
 
@@ -548,12 +554,206 @@ class CPU_Scheduling_Screen(MDScreen):
 
         self.draw_gantt_chart(completed)
 
+
+
     def priority_preemptive_pressed(self):
-        print("Priority (Pre-Emptive) Button Pressed")
+
+        if len(self.processes) == 0:
+            return
+
+        processes = []
+
+        for p in self.processes:
+            processes.append({
+                "pid": p["pid"],
+                "at": p["at"],
+                "bt": p["bt"],
+                "priority": p["priority"],
+                "remaining": p["bt"]
+            })
+
+        current_time = 0
+        completed = 0
+        n = len(processes)
+
+        while completed < n:
+
+            available = [
+                p for p in processes
+                if p["at"] <= current_time and p["remaining"] > 0
+            ]
+
+            if not available:
+                current_time += 1
+                continue
+
+            current = min(
+                available,
+                key=lambda p: p["priority"]
+            )
+
+            current["remaining"] -= 1
+            current_time += 1
+
+            if current["remaining"] == 0:
+
+                completed += 1
+
+                finish = current_time
+
+                tat = finish - current["at"]
+                wt = tat - current["bt"]
+
+                current["tat"] = tat
+                current["wt"] = wt
+
+        avg_waiting = sum(p["wt"] for p in processes) / n
+        avg_turnaround = sum(p["tat"] for p in processes) / n
+
+        self.ids.waiting_time.text = f"{avg_waiting:.2f} ms"
+        self.ids.turnaround_time.text = f"{avg_turnaround:.2f} ms"
 
     def priority_nonpreemptive_pressed(self):
-        print("Priority (Non-Pre-Emptive) Button Pressed")
+
+        if len(self.processes) == 0:
+            return
+
+        processes = [p.copy() for p in self.processes]
+
+        completed = []
+        current_time = 0
+
+        total_waiting = 0
+        total_turnaround = 0
+
+        gantt = []
+
+        while len(completed) < len(processes):
+
+            available = [
+                p for p in processes
+                if p not in completed and p["at"] <= current_time
+            ]
+
+            if not available:
+                current_time += 1
+                continue
+
+            highest = min(
+                available,
+                key=lambda p: p["priority"]
+            )
+
+            waiting = current_time - highest["at"]
+            turnaround = waiting + highest["bt"]
+
+            highest["wt"] = waiting
+            highest["tat"] = turnaround
+
+            total_waiting += waiting
+            total_turnaround += turnaround
+
+            gantt.append(highest)
+
+            current_time += highest["bt"]
+
+            completed.append(highest)
+
+        avg_waiting = total_waiting / len(processes)
+        avg_turnaround = total_turnaround / len(processes)
+
+        self.ids.waiting_time.text = f"{avg_waiting:.2f} ms"
+        self.ids.turnaround_time.text = f"{avg_turnaround:.2f} ms"
+
+        self.draw_gantt_chart(gantt)
 
     def rr_pressed(self):
-        print("Round Robin Button Pressed")
 
+        if len(self.processes) == 0:
+            return
+
+        quantum_text = self.ids.quantum_time.text.strip()
+
+        if quantum_text == "":
+            print("Enter Quantum Time")
+            return
+
+        quantum = int(quantum_text)
+
+        processes = []
+
+        for p in self.processes:
+            processes.append({
+                "pid": p["pid"],
+                "at": p["at"],
+                "bt": p["bt"],
+                "remaining": p["bt"]
+            })
+
+        processes.sort(key=lambda x: x["at"])
+
+        current_time = 0
+        completed = 0
+        n = len(processes)
+
+        queue = []
+        gantt = []
+
+        i = 0
+
+        while completed < n:
+
+            while i < n and processes[i]["at"] <= current_time:
+                queue.append(processes[i])
+                i += 1
+
+            if not queue:
+                current_time += 1
+                continue
+
+            current = queue.pop(0)
+
+            start = current_time
+
+            execution = min(
+                quantum,
+                current["remaining"]
+            )
+
+            current_time += execution
+
+            current["remaining"] -= execution
+
+            gantt.append({
+                "pid": current["pid"],
+                "bt": execution,
+                "at": start
+            })
+
+            while i < n and processes[i]["at"] <= current_time:
+                queue.append(processes[i])
+                i += 1
+
+            if current["remaining"] > 0:
+
+                queue.append(current)
+
+            else:
+
+                completed += 1
+
+                finish = current_time
+
+                tat = finish - current["at"]
+                wt = tat - current["bt"]
+
+                current["tat"] = tat
+                current["wt"] = wt
+
+        avg_wt = sum(p["wt"] for p in processes) / n
+        avg_tat = sum(p["tat"] for p in processes) / n
+
+        self.ids.waiting_time.text = f"{avg_wt:.2f} ms"
+        self.ids.turnaround_time.text = f"{avg_tat:.2f} ms"
+
+        self.draw_gantt_chart(gantt)
