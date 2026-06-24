@@ -178,7 +178,7 @@ KV = '''
                     padding: dp(10)
 
                     MDLabel:
-                        text: "Gantt Chart"
+                        text: "GANNT CHART"
                         halign: "center"
 
                     MDBoxLayout:
